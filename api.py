@@ -47,7 +47,7 @@ def authentication_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            print(request.headers)
+            # print(request.headers)
             access_token = dict(request.headers).get("User-Token")
             if not access_token:
                 return make_response({"error_code": "TOKEN100", "error_message": "Id Token Missing"}, 404)
@@ -78,7 +78,7 @@ class FileTranscription(Resource):
             # Get the file and uid from the request
             file = request.files['file']
             uid = request.form.get('uid')
-            print(file)
+            # print(file)
 
             # Save the file with a secure filename
             file_name = secure_filename(file.filename)
@@ -88,7 +88,7 @@ class FileTranscription(Resource):
             # Print file name and size
             # print(file_si÷ze)
             file_size = os.path.getsize(file_path)
-            print(f"File Name: {file_name}, File Size: {file_size} bytes")
+            # print(f"File Name: {file_name}, File Size: {file_size} bytes")
 
             # Load the Whisper ASR model
 
@@ -97,7 +97,7 @@ class FileTranscription(Resource):
 
             # Get the transcribed text
             transcribed_text = result["text"]
-            print(f"Transcribed Text: {transcribed_text}")
+            # print(f"Transcribed Text: {transcribed_text}")
 
             db.collection('userData').document(g.user.get('uid')).collection('transcriptions').add({
                 'transcribed text': transcribed_text,
@@ -108,16 +108,17 @@ class FileTranscription(Resource):
 
             return {'message': transcribed_text}, 200
         except Exception as e:
-            print(f"Error processing file: {str(e)}")
+            # print(f"Error processing file: {str(e)}")
             return {'error': 'Failed to process file'}, 500
 
 
 class TranscriptList(Resource):
     @authentication_required
+    @cache.memoize(24*60*60)
     def get(self):
         try:
             # Fetch transcripts for the given uid
-            print(g.user)
+            # print(g.user)
             query = db.collection('userData').document(g.user.get('uid'))
             if query.get().exists:
                 query = query.collection('transcriptions').stream()
@@ -132,7 +133,7 @@ class TranscriptList(Resource):
             } for doc in query]
             return {'transcripts': transcripts_list}, 200
         except Exception as e:
-            print(e)
+            # print(e)
             return {'error': 'Failed to fetch transcripts'}, 500
 
 class Test(Resource):
@@ -141,14 +142,22 @@ class Test(Resource):
         return jsonify(message="HEYYY")
 
 
-def get_transcripts(uid):
-    transcripts = db.session.query(Transcripts).filter_by(user_id=uid).all()
-    print('1')
-    return transcripts
+def get_transcripts():
+    query = db.collection('userData').document(g.user.get('uid'))
+    if query.get().exists:
+        query = query.collection('transcriptions').stream()
+    else:
+        db.collection('userData').document(g.user.get('uid')).set({'created_at':firestore.SERVER_TIMESTAMP})
+        query=[]
+    transcripts_list = [doc.to_dict().get('transcribed text') for doc in query]
+    # transcripts = db.session.query(Transcripts).filter_by(user_id=uid).all()
+    # print('1')
+    return transcripts_list
 
 
 def analyze_text(transcripts):
-    all_text = ' '.join([transcript.transcript for transcript in transcripts])
+    # print(transcripts)
+    all_text = ' '.join([transcript for transcript in transcripts])
 
     all_words = []
     all_phrases = []
@@ -187,11 +196,13 @@ def analyze_text(transcripts):
 
 
 class FrequentWords(Resource):
-    def get(self, user_id):
-        transcripts = get_transcripts(user_id)
-
+    @cache.memoize(24*60*60)
+    @authentication_required
+    def get(self):
+        transcripts = get_transcripts()
+        # print(transcripts)
         if not transcripts:
-            return jsonify({"error": f"No transcripts found for user with ID {user_id}"}), 404
+            return jsonify({"error": f"No transcripts found for user"}), 404
 
         words, phrases = analyze_text(transcripts)
         result = {
@@ -201,7 +212,7 @@ class FrequentWords(Resource):
         return jsonify(result)
 
 
-api.add_resource(FrequentWords, '/frequentwords/<user_id>')
+api.add_resource(FrequentWords, '/frequentwords')
 api.add_resource(FileTranscription, '/transcribe')
 api.add_resource(TranscriptList, '/transcripts')
 api.add_resource(Test,'/test')
