@@ -211,6 +211,9 @@ class FrequentWords(Resource):
         }
         return jsonify(result)
 
+@app.route('/')
+def hello_world():
+    return "Hello World"
 
 api.add_resource(FrequentWords, '/frequentwords')
 api.add_resource(FileTranscription, '/transcribe')
